@@ -10,14 +10,16 @@ import android.support.annotation.Nullable;
 import android.support.v4.app.Fragment;
 import android.support.v7.widget.GridLayoutManager;
 import android.support.v7.widget.RecyclerView;
+import android.support.v7.widget.SearchView;
 import android.util.Log;
 import android.view.LayoutInflater;
+import android.view.Menu;
+import android.view.MenuInflater;
+import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ImageView;
-import android.widget.TextView;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -39,7 +41,8 @@ public class PhotoGalleryFragment extends Fragment
     {
         super.onCreate(savedInstanceState);
         setRetainInstance(true);
-        new FetchItemsTask().execute();
+        setHasOptionsMenu(true);
+        updateItems();
 
         Handler responseHandler = new Handler();
         mPhotoHolderThumbnailDownloader = new ThumbnailDownloader<>(responseHandler);
@@ -48,13 +51,71 @@ public class PhotoGalleryFragment extends Fragment
             @Override
             public void onThumbnailDownloaded(PhotoHolder target, Bitmap thumbnail)
             {
-                Drawable drawable = new BitmapDrawable(getResources() ,thumbnail);
+                Drawable drawable = new BitmapDrawable(getResources(), thumbnail);
                 target.bindDrawable(drawable);
             }
         });
         mPhotoHolderThumbnailDownloader.start();
         mPhotoHolderThumbnailDownloader.getLooper(); //Important to do to avoid race condition
         Log.i(TAG, "Background thread started!");
+    }
+
+    @Override
+    public void onCreateOptionsMenu(Menu menu, MenuInflater inflater)
+    {
+        super.onCreateOptionsMenu(menu, inflater);
+        inflater.inflate(R.menu.fragment_photo_gallery, menu);
+
+        MenuItem searchItem = menu.findItem(R.id.menu_item_search);
+        final SearchView searchView = (SearchView) searchItem.getActionView();
+        searchView.setOnQueryTextListener(new SearchView.OnQueryTextListener()
+        {
+            @Override
+            public boolean onQueryTextSubmit(String query)
+            {
+                Log.d(TAG, "QueryTextSubmit: " + query);
+                QueryPreferences.setStoredQuery(getActivity(), query);
+                updateItems();
+                return true;
+            }
+
+            @Override
+            public boolean onQueryTextChange(String newText)
+            {
+                Log.d(TAG, "QueryTextChanged: " + newText);
+                return false;
+            }
+        });
+
+        searchView.setOnSearchClickListener(new View.OnClickListener()
+        {
+            @Override
+            public void onClick(View view)
+            {
+                String query = QueryPreferences.getStoredQuery(getActivity());
+                searchView.setQuery(query, false);
+            }
+        });
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item)
+    {
+        switch (item.getItemId())
+        {
+            case R.id.menu_item_clear:
+                QueryPreferences.setStoredQuery(getActivity(), null);
+                updateItems();
+                return true;
+            default:
+                return super.onOptionsItemSelected(item);
+        }
+    }
+
+    private void updateItems()
+    {
+        String query = QueryPreferences.getStoredQuery(getActivity());
+        new FetchItemsTask(query).execute();
     }
 
     @Override
@@ -88,7 +149,7 @@ public class PhotoGalleryFragment extends Fragment
 
     private void setupAdapter()
     {
-        if(isAdded())
+        if (isAdded())
         {
             mPhotoRecyclerView.setAdapter(new PhotoAdapter(mItems));
         }
@@ -97,6 +158,7 @@ public class PhotoGalleryFragment extends Fragment
     private class PhotoHolder extends RecyclerView.ViewHolder
     {
         private ImageView mImageView;
+
         public PhotoHolder(View itemView)
         {
             super(itemView);
@@ -113,6 +175,7 @@ public class PhotoGalleryFragment extends Fragment
     private class PhotoAdapter extends RecyclerView.Adapter<PhotoHolder>
     {
         private List<GalleryItem> mGalleryItems;
+
         public PhotoAdapter(List<GalleryItem> galleryItems)
         {
             this.mGalleryItems = galleryItems;
@@ -145,10 +208,22 @@ public class PhotoGalleryFragment extends Fragment
 
     private class FetchItemsTask extends AsyncTask<Void, Void, List<GalleryItem>>
     {
+        private String mQuery;
+
+
+        private FetchItemsTask(String query)
+        {
+            mQuery = query;
+        }
+
         @Override
         protected List<GalleryItem> doInBackground(Void... voids)
         {
-                return new FlickrFetchr().fetchItems();
+            if (mQuery == null)
+            {
+                return new FlickrFetchr().fetchRecentPhotos();
+            }
+            return new FlickrFetchr().searchPhotos(mQuery);
         }
 
         @Override
